@@ -1,22 +1,30 @@
 package com.raphfrk.bukkit.serverportwarps;
 
 import java.io.File;
-import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
+
+import javax.persistence.PersistenceException;
 
 import org.bukkit.Server;
-import org.bukkit.command.Command;
-import org.bukkit.command.CommandSender;
-import org.bukkit.entity.Player;
-import org.bukkit.plugin.Plugin;
+import org.bukkit.event.Event.Priority;
+import org.bukkit.event.Event.Type;
 import org.bukkit.plugin.PluginDescriptionFile;
 import org.bukkit.plugin.PluginManager;
+import org.bukkit.plugin.ServicesManager;
 import org.bukkit.plugin.java.JavaPlugin;
 
-import com.raphfrk.bukkit.eventlink.EventLink;
-import com.raphfrk.bukkit.eventlink.MiscUtils;
-import com.raphfrk.bukkit.eventlink.MyPropertiesFile;
-import com.raphfrk.bukkit.serverportcore.ServerPortCore;
+import com.avaje.ebean.EbeanServer;
+import com.avaje.ebean.cache.ServerCacheManager;
+import com.raphfrk.bukkit.eventlinkapi.EventLinkAPI;
+import com.raphfrk.bukkit.serverportcoreapi.ServerPortCoreAPI;
+import com.raphfrk.bukkit.serverportwarps.command.DeleteWarpCommand;
+import com.raphfrk.bukkit.serverportwarps.command.ListWarpCommand;
+import com.raphfrk.bukkit.serverportwarps.command.SetWarpCommand;
+import com.raphfrk.bukkit.serverportwarps.command.UseWarpCommand;
+import com.raphfrk.bukkit.serverportwarps.database.DatabaseManager;
+import com.raphfrk.bukkit.serverportwarps.listeners.SPWCustomListener;
 
 public class ServerPortWarps extends JavaPlugin {
 
@@ -29,11 +37,23 @@ public class ServerPortWarps extends JavaPlugin {
 	Server server;
 
 	PluginManager pm;
+	ServicesManager sm;
+
+	DependencyManager dm;
+
+	EbeanServer eb;
+
+	public SPWCustomListener customListener = new SPWCustomListener(this);
+
+	public WarpManager warpManager = new WarpManager(this);
 
 	static MiscUtils.LogInstance logger = MiscUtils.getLogger("[ServerPortWarps]");
-	
-	EventLink eventLink;
-	ServerPortCore serverPortCore;
+
+	public EventLinkAPI eventLink;
+	public ServerPortCoreAPI serverPortCore;
+	PluginDescriptionFile pdfFile;
+
+	public MyPermissions permissions = new MyPermissions(this);
 
 	public void onEnable() {
 
@@ -46,33 +66,30 @@ public class ServerPortWarps extends JavaPlugin {
 
 		pluginDirectory = this.getDataFolder();
 
-		if( !readConfig() ) {
-			log("Unable to read configs or create dirs, ServerPort warps failed to start");
-			return;
-		}
+		pdfFile = this.getDescription();
 
-		//		pm.registerEvent(Type.CUSTOM_EVENT, customListener, Priority.Normal, this);
-		//		pm.registerEvent(Type.PLAYER_JOIN, playerListener, Priority.Normal, this);
-		//		pm.registerEvent(Type.PLAYER_QUIT, playerListener, Priority.Normal, this);
-		//		pm.registerEvent(Type.WORLD_LOAD, worldListener, Priority.Normal, this);
+		permissions.init();
 
-		PluginDescriptionFile pdfFile = this.getDescription();
-		
-		Plugin plugin = pm.getPlugin("EventLink");
-		if(plugin != null && !(plugin instanceof EventLink)) {
-			eventLink = (EventLink)plugin;
-			log("Unable to connect to EventLink - disabling plugin");
-			pm.disablePlugin(this);
-		}
-		plugin = pm.getPlugin("Server Port Core");
-		if(plugin != null && !(plugin instanceof ServerPortCore)) {
-			serverPortCore = (ServerPortCore)plugin;
-			log("Unable to connect to Server Port Core - disabling plugin");
-			pm.disablePlugin(this);
-		}
-		if(pm.isPluginEnabled(this)) {
+		sm = getServer().getServicesManager();
+
+		dm = new DependencyManager(this);
+
+		if(dm.connectEventLink() && dm.connectServerPortCore() && pm.isPluginEnabled(this)) {
 			log(pdfFile.getName() + " version " + pdfFile.getVersion() + " is enabled!");
 		}
+
+		DatabaseManager.setupDatabaseManual(this, "[ServerPortWarps]");
+		eb = getDatabase();
+
+		getCommand("spw").setExecutor(new UseWarpCommand(this));
+		getCommand("spwset").setExecutor(new SetWarpCommand(this));
+		//		getCommand("spwsetg").setExecutor(new SetWarpGroupCommand());
+		getCommand("spwdel").setExecutor(new DeleteWarpCommand(this));
+		getCommand("spwlist").setExecutor(new ListWarpCommand(this));
+
+		pm.registerEvent(Type.CUSTOM_EVENT, customListener, Priority.Normal, this);
+
+		warpManager.registerWarps();
 
 	}
 
@@ -80,52 +97,19 @@ public class ServerPortWarps extends JavaPlugin {
 	}
 
 
-	private boolean readConfig() {
-
-		if( !pluginDirectory.exists() ) {
-			pluginDirectory.mkdirs();
-		}
-
-		MyPropertiesFile pf;
-		try {
-			pf = new MyPropertiesFile(new File( pluginDirectory , "serverportwarps.txt").getCanonicalPath());
-		} catch (IOException e) {
-			return false;
-		}
-
-		pf.load();
-
-		pf.save();
-
-		return true;
-
-	}
-
 	public void log(String message) {
 		logger.log(message);
 	}
 
-	public boolean isAdmin(Player player) {
-		return eventLink != null && eventLink.isAdmin(player);
+	public void onLoad() {
+		new ServerPortLocationMirror();
 	}
 
 	@Override
-	public boolean onCommand(CommandSender commandSender, Command command, String commandLabel, String[] args) {
-
-		if(!commandSender.isOp()) {
-			commandSender.sendMessage("You do not have sufficient user level for this command");
-			return true;
-		}
-
-		if(command.getName().equals("serverport")) {
-
-			commandSender.sendMessage("No commands are implemented yet for this plugin");
-
-		}
-
-		return false;
-
+	public List<Class<?>> getDatabaseClasses() {
+		List<Class<?>> list = new ArrayList<Class<?>>();
+		list.add(ServerPortLocationMirror.class);
+		return list;
 	}
-
 }
 
